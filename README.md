@@ -4,10 +4,15 @@
 
 ## 🚀 Deployment
 
-Um dieses Projekt bereitzustellen, führen Sie die folgenden Befehle aus:
+To Run this Project, execute:
 
 ```bash
 pip install -r requirements.txt
 py main.py
 ```
 
+##✨ Features
+- Find Anticheat (Beta! Noch nicht 100% fertig)
+- Find Trigger
+- Find Webhooks
+- Find Variables
