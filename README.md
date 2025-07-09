@@ -16,3 +16,4 @@ py main.py
 - Find Trigger
 - Find Webhooks
 - Find Variables
+- Find Items (shows item images)

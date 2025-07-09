@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QRadioButton, QButtonGroup, QStatusBar, QScrollArea, QFrame, QProgressBar,
     QGroupBox, QSplitter, QSizePolicy, QComboBox, QSpinBox, QListWidget,
     QListWidgetItem, QInputDialog, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView
+    QHeaderView, QAbstractItemView, QGridLayout
 )
 from PyQt6.QtGui import QFont, QPalette, QColor, QTextCursor, QIcon, QPixmap
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
@@ -289,6 +289,35 @@ class VariableScanner(QThread):
         except Exception as e:
             self.error.emit(str(e))
 
+class ItemScanner(QThread):
+    """Scan the server dump for image files representing items."""
+
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+        self.extensions = [".png", ".jpg", ".jpeg", ".webp"]
+
+    def run(self):
+        try:
+            images = []
+            total_files = sum(len(files) for _, _, files in os.walk(self.path))
+            processed_files = 0
+
+            for root, dirs, files in os.walk(self.path):
+                for filename in files:
+                    processed_files += 1
+                    if any(filename.lower().endswith(ext) for ext in self.extensions):
+                        images.append(os.path.join(root, filename))
+                    self.progress.emit(processed_files, total_files)
+
+            self.finished.emit(images)
+        except Exception as e:
+            self.error.emit(str(e))
+
 ################## Main Application #######################
 class FemDumperApp(QMainWindow):
     def __init__(self):
@@ -318,6 +347,7 @@ class FemDumperApp(QMainWindow):
         self.anticheat_scanner = None
         self.variable_scanner = None
         self.known_anticheat_scanner = None
+        self.item_scanner = None
 
     def get_style_sheet(self):
         return """
@@ -449,6 +479,7 @@ class FemDumperApp(QMainWindow):
         self.create_webhooks_tab()
         self.create_anticheat_tab()
         self.create_variables_tab()
+        self.create_items_tab()
         self.create_builder_tab()
         self.create_settings_tab()
         
@@ -809,8 +840,41 @@ class FemDumperApp(QMainWindow):
 
         results_layout.addWidget(self.variable_table)
         layout.addWidget(results_frame, 1)
-        
+
         self.tab_widget.addTab(tab, "Variables")
+
+    def create_items_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(15, 15, 15, 15)
+
+        title = QLabel("Item Search")
+        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: #4a9;")
+        layout.addWidget(title)
+
+        controls_layout = QHBoxLayout()
+
+        self.scan_items_btn = QPushButton("Scan Items")
+        self.scan_items_btn.setFixedHeight(35)
+        self.scan_items_btn.clicked.connect(self.find_items)
+
+        controls_layout.addWidget(self.scan_items_btn)
+        controls_layout.addStretch()
+
+        layout.addLayout(controls_layout)
+
+        self.items_scroll = QScrollArea()
+        self.items_scroll.setWidgetResizable(True)
+        self.items_container = QWidget()
+        self.items_layout = QGridLayout(self.items_container)
+        self.items_layout.setContentsMargins(10, 10, 10, 10)
+        self.items_layout.setSpacing(10)
+        self.items_scroll.setWidget(self.items_container)
+
+        layout.addWidget(self.items_scroll, 1)
+
+        self.tab_widget.addTab(tab, "Items")
 
     def create_builder_tab(self):
         tab = QWidget()
@@ -1203,7 +1267,8 @@ class FemDumperApp(QMainWindow):
         self.find_anticheat_keywords()
         self.find_known_anticheats()
         self.find_variables()
-        
+        self.find_items()
+
         self.status_bar.showMessage("All scans started...")
 
     def find_triggers(self):
@@ -1564,6 +1629,60 @@ class FemDumperApp(QMainWindow):
             f.write("\nVariables:\n")
             for folder, line, content in results:
                 f.write(f"[{folder}] - [Line {line}] {content}\n")
+
+    def find_items(self):
+        if not self.validate_path():
+            return
+
+        self.scan_items_btn.setEnabled(False)
+        self.status_bar.showMessage("Scanning for items...")
+        self.progress_bar.show()
+
+        # Clear previous results
+        for i in reversed(range(self.items_layout.count())):
+            widget = self.items_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+
+        self.item_scanner = ItemScanner(TRIGGER_PATH)
+        self.item_scanner.progress.connect(self.update_progress)
+        self.item_scanner.finished.connect(self.on_items_found)
+        self.item_scanner.error.connect(self.on_scan_error)
+        self.item_scanner.finished.connect(lambda: self.scan_items_btn.setEnabled(True))
+        self.item_scanner.start()
+
+    def on_items_found(self, results):
+        self.progress_bar.hide()
+
+        if not results:
+            self.status_bar.showMessage("Item scan completed: 0 items found")
+            return
+
+        self.status_bar.showMessage(f"Item scan completed: {len(results)} items found")
+        self.populate_item_grid(results)
+
+    def populate_item_grid(self, results):
+        columns = 4
+        row = 0
+        col = 0
+        for path in results:
+            frame = QFrame()
+            f_layout = QVBoxLayout(frame)
+            pixmap = QPixmap(path)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            label_img = QLabel()
+            label_img.setPixmap(pixmap)
+            label_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label_text = QLabel(os.path.basename(path))
+            label_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            f_layout.addWidget(label_img)
+            f_layout.addWidget(label_text)
+            self.items_layout.addWidget(frame, row, col)
+            col += 1
+            if col >= columns:
+                row += 1
+                col = 0
 
     def generate_trigger_code(self):
         event_type = "server" if self.server_radio.isChecked() else "client"
