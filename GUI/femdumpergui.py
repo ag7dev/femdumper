@@ -41,17 +41,30 @@ TRIGGER_PATH = "None"
 if not os.path.exists(FEMDUMPER_FOLDER):
     os.makedirs(FEMDUMPER_FOLDER)
 
-def get_resource_name(file_path, base_path):
-    """Return the resource folder for a given file."""
+def get_resource_name(file_path, base_path=None):
+    """Return the resource folder for a given file.
+
+    This walks up the directory tree starting from the file location and
+    returns the first directory that contains either a ``fxmanifest.lua`` or
+    ``__resource.lua``.  If none are found, the direct parent folder name of
+    the file is returned. ``base_path`` is optional and only used to limit the
+    search when provided.
+    """
+
     current = os.path.dirname(file_path)
-    while os.path.commonpath([current, base_path]) == base_path:
+    while True:
         if os.path.exists(os.path.join(current, "fxmanifest.lua")) or \
            os.path.exists(os.path.join(current, "__resource.lua")):
             return os.path.basename(current)
+
+        if base_path and os.path.abspath(current) == os.path.abspath(base_path):
+            break
+
         parent = os.path.dirname(current)
         if parent == current:
             break
         current = parent
+
     return os.path.basename(os.path.dirname(file_path))
 
 ################## Settings Management ####################
@@ -235,7 +248,7 @@ class KnownAnticheatScanner(QThread):
                     for filename in files:
                         if filename == file_to_check:
                             folder_name = os.path.basename(root)
-                            ac_detections.append(f"{detection_name} detected in {folder_name}")
+                            ac_detections.append((folder_name, detection_name))
             
             self.finished.emit(ac_detections)
         except Exception as e:
@@ -583,9 +596,12 @@ class FemDumperApp(QMainWindow):
             "Risk Level",
             "Actions",
         ])
-        self.trigger_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
+        header = self.trigger_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.trigger_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
         results_layout.addWidget(self.trigger_table)
@@ -638,12 +654,20 @@ class FemDumperApp(QMainWindow):
         results_frame.setFrameShape(QFrame.Shape.StyledPanel)
         results_layout = QVBoxLayout(results_frame)
         
-        self.webhook_text = QTextEdit()
-        self.webhook_text.setReadOnly(True)
-        self.webhook_text.setFont(QFont("Consolas", 10))
-        self.webhook_text.setPlaceholderText("Webhook results will appear here...")
-        
-        results_layout.addWidget(self.webhook_text)
+        self.webhook_table = QTableWidget()
+        self.webhook_table.setColumnCount(3)
+        self.webhook_table.setHorizontalHeaderLabels([
+            "File",
+            "Webhook",
+            "Actions",
+        ])
+        header = self.webhook_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.webhook_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        results_layout.addWidget(self.webhook_table)
         layout.addWidget(results_frame, 1)
         
         self.tab_widget.addTab(tab, "Webhooks")
@@ -704,12 +728,33 @@ class FemDumperApp(QMainWindow):
         results_frame.setFrameShape(QFrame.Shape.StyledPanel)
         results_layout = QVBoxLayout(results_frame)
         
-        self.anticheat_text = QTextEdit()
-        self.anticheat_text.setReadOnly(True)
-        self.anticheat_text.setFont(QFont("Consolas", 10))
-        self.anticheat_text.setPlaceholderText("Anti-cheat results will appear here...")
-        
-        results_layout.addWidget(self.anticheat_text)
+        self.anticheat_table = QTableWidget()
+        self.anticheat_table.setColumnCount(3)
+        self.anticheat_table.setHorizontalHeaderLabels([
+            "Resource",
+            "Line",
+            "Content",
+        ])
+        header_ac = self.anticheat_table.horizontalHeader()
+        header_ac.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header_ac.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header_ac.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.anticheat_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        # Known AC table
+        self.known_ac_table = QTableWidget()
+        self.known_ac_table.setColumnCount(2)
+        self.known_ac_table.setHorizontalHeaderLabels([
+            "Resource",
+            "AC Name",
+        ])
+        header_known = self.known_ac_table.horizontalHeader()
+        header_known.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header_known.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.known_ac_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        results_layout.addWidget(self.anticheat_table)
+        results_layout.addWidget(self.known_ac_table)
         layout.addWidget(results_frame, 1)
         
         self.tab_widget.addTab(tab, "Anti-Cheat")
@@ -749,12 +794,20 @@ class FemDumperApp(QMainWindow):
         results_frame.setFrameShape(QFrame.Shape.StyledPanel)
         results_layout = QVBoxLayout(results_frame)
         
-        self.variable_text = QTextEdit()
-        self.variable_text.setReadOnly(True)
-        self.variable_text.setFont(QFont("Consolas", 10))
-        self.variable_text.setPlaceholderText("Variable results will appear here...")
-        
-        results_layout.addWidget(self.variable_text)
+        self.variable_table = QTableWidget()
+        self.variable_table.setColumnCount(3)
+        self.variable_table.setHorizontalHeaderLabels([
+            "Resource",
+            "Line",
+            "Variable",
+        ])
+        header_var = self.variable_table.horizontalHeader()
+        header_var.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header_var.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header_var.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.variable_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        results_layout.addWidget(self.variable_table)
         layout.addWidget(results_frame, 1)
         
         self.tab_widget.addTab(tab, "Variables")
@@ -1236,6 +1289,43 @@ class FemDumperApp(QMainWindow):
             btn.clicked.connect(partial(self.open_in_vscode, file_path, line))
             self.trigger_table.setCellWidget(row, 4, btn)
 
+    def populate_webhook_table(self, results):
+        self.webhook_table.setRowCount(0)
+        for path, url in results:
+            row = self.webhook_table.rowCount()
+            self.webhook_table.insertRow(row)
+            self.webhook_table.setItem(row, 0, QTableWidgetItem(os.path.basename(path)))
+            self.webhook_table.setItem(row, 1, QTableWidgetItem(url))
+            btn = QPushButton("VSCode")
+            btn.clicked.connect(partial(self.open_in_vscode, path, 1))
+            self.webhook_table.setCellWidget(row, 2, btn)
+
+    def populate_anticheat_table(self, results):
+        self.anticheat_table.setRowCount(0)
+        for folder, line, content in results:
+            row = self.anticheat_table.rowCount()
+            self.anticheat_table.insertRow(row)
+            self.anticheat_table.setItem(row, 0, QTableWidgetItem(folder))
+            self.anticheat_table.setItem(row, 1, QTableWidgetItem(str(line)))
+            self.anticheat_table.setItem(row, 2, QTableWidgetItem(content))
+
+    def populate_known_ac_table(self, results):
+        self.known_ac_table.setRowCount(0)
+        for folder, ac_name in results:
+            row = self.known_ac_table.rowCount()
+            self.known_ac_table.insertRow(row)
+            self.known_ac_table.setItem(row, 0, QTableWidgetItem(folder))
+            self.known_ac_table.setItem(row, 1, QTableWidgetItem(ac_name))
+
+    def populate_variable_table(self, results):
+        self.variable_table.setRowCount(0)
+        for folder, line, content in results:
+            row = self.variable_table.rowCount()
+            self.variable_table.insertRow(row)
+            self.variable_table.setItem(row, 0, QTableWidgetItem(folder))
+            self.variable_table.setItem(row, 1, QTableWidgetItem(str(line)))
+            self.variable_table.setItem(row, 2, QTableWidgetItem(content))
+
     def find_webhooks(self):
         if not self.validate_path():
             return
@@ -1246,7 +1336,7 @@ class FemDumperApp(QMainWindow):
         self.progress_bar.show()
         
         # Clear previous results
-        self.webhook_text.clear()
+        self.webhook_table.setRowCount(0)
         
         # Create and start scanner thread
         self.webhook_scanner = WebhookScanner(TRIGGER_PATH)
@@ -1262,19 +1352,15 @@ class FemDumperApp(QMainWindow):
         self.progress_bar.hide()
         
         if not results:
-            self.webhook_text.setPlainText("No valid Discord webhooks found.")
+            self.webhook_table.setRowCount(0)
             self.status_bar.showMessage("Webhook scan completed: 0 webhooks found")
             return
-            
+
         self.status_bar.showMessage(
             f"Webhook scan completed: {len(results)} webhooks found"
         )
-        
-        # Display first 50 results
-        self.webhook_text.setPlainText("\n\n".join(
-            f"File: {path}\nWebhook: {url}"
-            for path, url in results[:50]
-        ))
+
+        self.populate_webhook_table(results)
         
         # Save to file
         output_file = os.path.join(FEMDUMPER_FOLDER, "discord_webhooks.txt")
@@ -1366,7 +1452,8 @@ class FemDumperApp(QMainWindow):
         self.progress_bar.show()
         
         # Clear previous results
-        self.anticheat_text.clear()
+        self.anticheat_table.setRowCount(0)
+        self.known_ac_table.setRowCount(0)
         
         # Create and start scanner thread
         self.anticheat_scanner = AnticheatScanner(
@@ -1386,7 +1473,7 @@ class FemDumperApp(QMainWindow):
         self.progress_bar.hide()
         
         if not results:
-            self.anticheat_text.setPlainText("No anti-cheat keywords found.")
+            self.anticheat_table.setRowCount(0)
             self.status_bar.showMessage("Anti-cheat scan completed: 0 keywords found")
             return
             
@@ -1394,11 +1481,7 @@ class FemDumperApp(QMainWindow):
             f"Anti-cheat scan completed: {len(results)} keywords found"
         )
         
-        # Display first 100 results
-        self.anticheat_text.setPlainText("\n".join(
-            f"[{folder}] Line {line}: {content}"
-            for folder, line, content in results[:100]
-        ))
+        self.populate_anticheat_table(results)
         
         # Save to file
         output_file = os.path.join(FEMDUMPER_FOLDER, "anticheat_keywords.txt")
@@ -1425,13 +1508,10 @@ class FemDumperApp(QMainWindow):
 
     def on_known_anticheats_found(self, results):
         if not results:
-            # Append to existing results
-            self.anticheat_text.append("\nNo known anti-cheats detected.")
             self.status_bar.showMessage("Known AC scan completed: 0 detections")
             return
-            
-        # Append to existing results
-        self.anticheat_text.append("\n" + "\n".join(results))
+
+        self.populate_known_ac_table(results)
         self.status_bar.showMessage(
             f"Known AC scan completed: {len(results)} detections"
         )
@@ -1439,8 +1519,8 @@ class FemDumperApp(QMainWindow):
         # Save to file
         output_file = os.path.join(FEMDUMPER_FOLDER, "known_anticheats.txt")
         with open(output_file, "w", encoding="utf-8") as f:
-            for detection in results:
-                f.write(f"{detection}\n")
+            for folder, ac_name in results:
+                f.write(f"{ac_name} detected in {folder}\n")
 
     def find_variables(self):
         if not self.validate_path():
@@ -1452,7 +1532,7 @@ class FemDumperApp(QMainWindow):
         self.progress_bar.show()
         
         # Clear previous results
-        self.variable_text.clear()
+        self.variable_table.setRowCount(0)
         
         # Create and start scanner thread
         self.variable_scanner = VariableScanner(TRIGGER_PATH)
@@ -1468,7 +1548,7 @@ class FemDumperApp(QMainWindow):
         self.progress_bar.hide()
         
         if not results:
-            self.variable_text.setPlainText("No special variables found.")
+            self.variable_table.setRowCount(0)
             self.status_bar.showMessage("Variable scan completed: 0 variables found")
             return
             
@@ -1476,11 +1556,7 @@ class FemDumperApp(QMainWindow):
             f"Variable scan completed: {len(results)} variables found"
         )
         
-        # Display first 100 results
-        self.variable_text.setPlainText("\n".join(
-            f"[{folder}] Line {line}: {content}"
-            for folder, line, content in results[:100]
-        ))
+        self.populate_variable_table(results)
         
         # Save to file
         output_file = os.path.join(FEMDUMPER_FOLDER, "variables.txt")
@@ -1571,7 +1647,11 @@ end"""
         try:
             subprocess.Popen(["code", "-g", f"{path}:{line}"])
         except Exception as e:
-            QMessageBox.critical(self, "Open Error", f"Failed to open in VSCode: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "Open Error",
+                "Failed to open in VSCode. Ensure the 'code' command is installed and in your PATH."
+            )
 
     def update_progress(self, current, total):
         if total > 0:
