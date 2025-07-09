@@ -10,12 +10,15 @@ import json
 import random
 import string
 import psutil
+import subprocess
+from functools import partial
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
     QLabel, QPushButton, QTextEdit, QLineEdit, QFileDialog, QMessageBox,
     QRadioButton, QButtonGroup, QStatusBar, QScrollArea, QFrame, QProgressBar,
-    QGroupBox, QSplitter, QSizePolicy, QComboBox, QSpinBox, QListWidget, 
-    QListWidgetItem, QInputDialog
+    QGroupBox, QSplitter, QSizePolicy, QComboBox, QSpinBox, QListWidget,
+    QListWidgetItem, QInputDialog, QTableWidget, QTableWidgetItem,
+    QHeaderView, QAbstractItemView
 )
 from PyQt6.QtGui import QFont, QPalette, QColor, QTextCursor, QIcon, QPixmap
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
@@ -38,6 +41,19 @@ TRIGGER_PATH = "None"
 if not os.path.exists(FEMDUMPER_FOLDER):
     os.makedirs(FEMDUMPER_FOLDER)
 
+def get_resource_name(file_path, base_path):
+    """Return the resource folder for a given file."""
+    current = os.path.dirname(file_path)
+    while os.path.commonpath([current, base_path]) == base_path:
+        if os.path.exists(os.path.join(current, "fxmanifest.lua")) or \
+           os.path.exists(os.path.join(current, "__resource.lua")):
+            return os.path.basename(current)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return os.path.basename(os.path.dirname(file_path))
+
 ################## Settings Management ####################
 def save_settings(settings):
     try:
@@ -52,7 +68,8 @@ def load_settings():
     default_settings = {
         "trigger_path": "None",
         "ac_keywords": ANTICHEAT_KEYWORDS,
-        "ignore_folders": FOLDERS_TO_IGNORE
+        "ignore_folders": FOLDERS_TO_IGNORE,
+        "risky_triggers": []
     }
     
     if os.path.exists(SETTINGS_FILE):
@@ -91,14 +108,14 @@ class TriggerScanner(QThread):
                 for filename in files:
                     if filename.endswith(".lua"):
                         file_path = os.path.join(root, filename)
-                        folder_name = os.path.basename(os.path.dirname(file_path))
+                        resource = get_resource_name(file_path, self.path)
                         try:
                             with open(file_path, "r", encoding="latin-1") as file:
                                 for line_number, line in enumerate(file, start=1):
                                     if re.search(r"\b(TriggerServerEvent|TriggerEvent)\b", line):
                                         if not self.keyword or self.keyword in line.lower():
-                                            trigger_events.append((folder_name, line_number, line.strip()))
-                        except Exception as e:
+                                            trigger_events.append((resource, file_path, line_number, line.strip()))
+                        except Exception:
                             continue
                     
                     processed_files += 1
@@ -556,13 +573,22 @@ class FemDumperApp(QMainWindow):
         results_frame = QFrame()
         results_frame.setFrameShape(QFrame.Shape.StyledPanel)
         results_layout = QVBoxLayout(results_frame)
-        
-        self.trigger_text = QTextEdit()
-        self.trigger_text.setReadOnly(True)
-        self.trigger_text.setFont(QFont("Consolas", 10))
-        self.trigger_text.setPlaceholderText("Trigger results will appear here...")
-        
-        results_layout.addWidget(self.trigger_text)
+
+        self.trigger_table = QTableWidget()
+        self.trigger_table.setColumnCount(5)
+        self.trigger_table.setHorizontalHeaderLabels([
+            "Resource",
+            "Trigger",
+            "Status",
+            "Risk Level",
+            "Actions",
+        ])
+        self.trigger_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.trigger_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        results_layout.addWidget(self.trigger_table)
         layout.addWidget(results_frame, 1)
         
         self.tab_widget.addTab(tab, "Triggers")
@@ -936,6 +962,25 @@ class FemDumperApp(QMainWindow):
         
         folder_layout.addLayout(folder_btn_layout)
         layout.addWidget(folder_group)
+
+        # Risky Triggers settings
+        risky_group = QGroupBox("Risky Triggers")
+        risky_layout = QVBoxLayout(risky_group)
+
+        self.risky_list = QListWidget()
+        self.risky_list.addItems(self.settings.get("risky_triggers", []))
+        risky_layout.addWidget(self.risky_list)
+
+        risky_btn_layout = QHBoxLayout()
+        self.add_risky_btn = QPushButton("Add Trigger")
+        self.add_risky_btn.clicked.connect(self.add_risky_trigger)
+        self.remove_risky_btn = QPushButton("Remove Trigger")
+        self.remove_risky_btn.clicked.connect(self.remove_risky_trigger)
+        risky_btn_layout.addWidget(self.add_risky_btn)
+        risky_btn_layout.addWidget(self.remove_risky_btn)
+        risky_layout.addLayout(risky_btn_layout)
+
+        layout.addWidget(risky_group)
         
         # Save settings button
         self.save_settings_btn = QPushButton("Save All Settings")
@@ -1025,17 +1070,37 @@ class FemDumperApp(QMainWindow):
         selected = self.folder_list.currentItem()
         if not selected:
             return
-            
+
         folder = selected.text()
         self.settings["ignore_folders"].remove(folder)
         self.folder_list.takeItem(self.folder_list.row(selected))
         self.status_bar.showMessage(f"Folder '{folder}' removed from ignore list")
+
+    def add_risky_trigger(self):
+        trigger, ok = QInputDialog.getText(
+            self, "Add Risky Trigger", "Enter trigger name:"
+        )
+        if ok and trigger:
+            self.settings.setdefault("risky_triggers", []).append(trigger)
+            self.risky_list.addItem(trigger)
+            self.status_bar.showMessage(f"Risky trigger '{trigger}' added")
+
+    def remove_risky_trigger(self):
+        selected = self.risky_list.currentItem()
+        if not selected:
+            return
+
+        trigger = selected.text()
+        self.settings.setdefault("risky_triggers", []).remove(trigger)
+        self.risky_list.takeItem(self.risky_list.row(selected))
+        self.status_bar.showMessage(f"Risky trigger '{trigger}' removed")
     
     def save_all_settings(self):
         # Update settings from UI
         self.settings["trigger_path"] = self.path_input.text()
         self.settings["ac_keywords"] = [self.ac_list.item(i).text() for i in range(self.ac_list.count())]
         self.settings["ignore_folders"] = [self.folder_list.item(i).text() for i in range(self.folder_list.count())]
+        self.settings["risky_triggers"] = [self.risky_list.item(i).text() for i in range(self.risky_list.count())]
         
         # Save to file
         if save_settings(self.settings):
@@ -1098,7 +1163,7 @@ class FemDumperApp(QMainWindow):
         self.progress_bar.show()
         
         # Clear previous results
-        self.trigger_text.clear()
+        self.trigger_table.setRowCount(0)
         
         # Get search keyword
         keyword = self.search_input.text().strip()
@@ -1120,55 +1185,56 @@ class FemDumperApp(QMainWindow):
             
         keyword = self.search_input.text().strip().lower()
         if not keyword:
-            # Show all results if no keyword
-            self.trigger_text.setPlainText("\n".join(
-                f"[{folder}] Line {line}: {content}"
-                for folder, line, content in self.trigger_results
-            ))
+            self.populate_trigger_table(self.trigger_results)
             return
             
         # Filter results by keyword
-        filtered = [
-            (folder, line, content)
-            for folder, line, content in self.trigger_results
-            if keyword in content.lower()
-        ]
+        filtered = [res for res in self.trigger_results if keyword in res[3].lower()]
         
         if not filtered:
-            self.trigger_text.setPlainText(f"No trigger events found containing '{keyword}'")
+            self.trigger_table.setRowCount(0)
             return
-            
-        self.trigger_text.setPlainText("\n".join(
-            f"[{folder}] Line {line}: {content}"
-            for folder, line, content in filtered
-        ))
+        self.populate_trigger_table(filtered)
         self.status_bar.showMessage(f"Found {len(filtered)} triggers containing '{keyword}'")
 
     def on_triggers_found(self, results):
         self.progress_bar.hide()
         self.trigger_results = results
-        
+
         if not results:
-            self.trigger_text.setPlainText("No trigger events found.")
+            self.trigger_table.setRowCount(0)
             self.status_bar.showMessage("Trigger scan completed: 0 events found")
             return
-            
+
         self.status_bar.showMessage(
             f"Trigger scan completed: {len(results)} events found"
         )
-        
-        # Display first 100 results
-        self.trigger_text.setPlainText("\n".join(
-            f"[{folder}] Line {line}: {content}"
-            for folder, line, content in results[:100]
-        ))
-        
+
+        self.populate_trigger_table(results)
+
         # Save to file
         output_file = os.path.join(FEMDUMPER_FOLDER, "trigger_events.txt")
         with open(output_file, "w", encoding="utf-8") as f:
-            for folder, line, content in results:
-                f.write(f"\n{'='*25} [{folder} - Line {line}] {'='*25}\n")
+            for resource, file_path, line, content in results:
+                f.write(f"\n{'='*25} [{resource} - Line {line}] {'='*25}\n")
                 f.write(f"{content}\n")
+
+    def populate_trigger_table(self, results):
+        self.trigger_table.setRowCount(0)
+        risky = [r.lower() for r in self.settings.get("risky_triggers", [])]
+        for resource, file_path, line, content in results:
+            risk_level = "Risky" if any(x in content.lower() for x in risky) else "N/A"
+            row = self.trigger_table.rowCount()
+            self.trigger_table.insertRow(row)
+            self.trigger_table.setItem(row, 0, QTableWidgetItem(resource))
+            self.trigger_table.setItem(row, 1, QTableWidgetItem(content))
+            status_item = QTableWidgetItem("New")
+            status_item.setBackground(QColor("green"))
+            self.trigger_table.setItem(row, 2, status_item)
+            self.trigger_table.setItem(row, 3, QTableWidgetItem(risk_level))
+            btn = QPushButton("VSCode")
+            btn.clicked.connect(partial(self.open_in_vscode, file_path, line))
+            self.trigger_table.setCellWidget(row, 4, btn)
 
     def find_webhooks(self):
         if not self.validate_path():
@@ -1487,7 +1553,7 @@ end"""
         if not os.path.exists(path):
             QMessageBox.warning(self, "File Not Found", "The requested file does not exist!")
             return
-            
+
         try:
             if sys.platform == "win32":
                 os.startfile(path)
@@ -1496,6 +1562,16 @@ end"""
                 os.system(f"{opener} {path}")
         except Exception as e:
             QMessageBox.critical(self, "Open Error", f"Failed to open file: {str(e)}")
+
+    def open_in_vscode(self, path, line):
+        if not os.path.exists(path):
+            QMessageBox.warning(self, "File Not Found", "The requested file does not exist!")
+            return
+
+        try:
+            subprocess.Popen(["code", "-g", f"{path}:{line}"])
+        except Exception as e:
+            QMessageBox.critical(self, "Open Error", f"Failed to open in VSCode: {str(e)}")
 
     def update_progress(self, current, total):
         if total > 0:
