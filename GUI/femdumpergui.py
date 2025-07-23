@@ -166,7 +166,7 @@ class WebhookScanner(QThread):
     def __init__(self, path):
         super().__init__()
         self.path = path
-        self.webhook_pattern = re.compile(r"https://discord\.com/api/webhooks/\w+/\w+")
+        self.webhook_pattern = re.compile(r"https://discord\.com/api/webhooks/[\w-]+/[\w-]+")
 
     def is_webhook_valid(self, url):
         try:
@@ -177,28 +177,52 @@ class WebhookScanner(QThread):
 
     def run(self):
         try:
-            webhook_urls = []
-            total_files = sum([len(files) for _, _, files in os.walk(self.path)])
-            processed_files = 0
-            
-            for root, dirs, files in os.walk(self.path):
+            all_files = []
+            for root, _, files in os.walk(self.path):
                 for filename in files:
-                    full_path = os.path.join(root, filename)
-                    if os.path.isfile(full_path):
-                        try:
-                            with open(full_path, "r", encoding="utf-8", errors="ignore") as file:
-                                content = file.read()
-                                matches = self.webhook_pattern.findall(content)
-                                for match in matches:
-                                    if self.is_webhook_valid(match):
-                                        webhook_urls.append((full_path, match))
-                        except Exception:
-                            continue
-                    
-                    processed_files += 1
-                    self.progress.emit(processed_files, total_files)
-            
-            self.finished.emit(webhook_urls)
+                    all_files.append(os.path.join(root, filename))
+
+            total_files = len(all_files)
+            processed_files = 0
+            found_webhooks = []
+
+            for file_path in all_files:
+                if os.path.isfile(file_path):
+                    try:
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                            matches = self.webhook_pattern.findall(content)
+                            for match in matches:
+                                found_webhooks.append((file_path, match))
+                    except Exception:
+                        pass
+
+                processed_files += 1
+                self.progress.emit(processed_files, total_files)
+
+            unique_map = {}
+            for path, url in found_webhooks:
+                unique_map.setdefault(url, []).append(path)
+
+            def check(url):
+                try:
+                    resp = requests.get(url, timeout=5)
+                    return url, resp.status_code == 200
+                except requests.RequestException:
+                    return url, False
+
+            valid_urls = set()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                for url, ok in executor.map(check, unique_map.keys()):
+                    if ok:
+                        valid_urls.add(url)
+
+            results = []
+            for url in valid_urls:
+                for path in unique_map[url]:
+                    results.append((path, url))
+
+            self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
 
