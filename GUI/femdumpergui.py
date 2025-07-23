@@ -671,6 +671,9 @@ class FemDumperApp(QMainWindow):
             "Risk Level",
             "Actions",
         ])
+        # Prevent very large minimum sizes when many rows are displayed
+        self.trigger_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.trigger_table.setMaximumHeight(600)
         header = self.trigger_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
