@@ -6,7 +6,8 @@ graphical user interface written with **PyQt6**.
 ## 🚀 Installation
 
 1. Ensure Python 3.10 or newer is installed.
-2. Install the required packages:
+2. Install the required packages (exact versions are pinned in
+   `requirements.txt`):
 
 ```bash
 pip install -r requirements.txt

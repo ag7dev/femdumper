@@ -68,7 +68,11 @@ def get_resource_name(file_path, base_path=None):
     return os.path.basename(os.path.dirname(file_path))
 
 ################## Settings Management ####################
-def save_settings(settings):
+from typing import Any, Dict, List
+
+
+def save_settings(settings: Dict[str, Any]) -> bool:
+    """Save the given settings dictionary to disk."""
     try:
         with open(SETTINGS_FILE, "w") as f:
             json.dump(settings, f, indent=4)
@@ -77,27 +81,43 @@ def save_settings(settings):
         print(f"Error saving settings: {e}")
         return False
 
-def load_settings():
-    default_settings = {
+
+def _validate_settings(loaded: Dict[str, Any], defaults: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a sanitized settings dictionary based on ``loaded`` values."""
+    validated = defaults.copy()
+
+    if isinstance(loaded.get("trigger_path"), str):
+        validated["trigger_path"] = loaded["trigger_path"]
+
+    if isinstance(loaded.get("ac_keywords"), list) and all(isinstance(x, str) for x in loaded["ac_keywords"]):
+        validated["ac_keywords"] = loaded["ac_keywords"]
+
+    if isinstance(loaded.get("ignore_folders"), list) and all(isinstance(x, str) for x in loaded["ignore_folders"]):
+        validated["ignore_folders"] = loaded["ignore_folders"]
+
+    if isinstance(loaded.get("risky_triggers"), list) and all(isinstance(x, str) for x in loaded["risky_triggers"]):
+        validated["risky_triggers"] = loaded["risky_triggers"]
+
+    return validated
+
+
+def load_settings() -> Dict[str, Any]:
+    """Load settings from ``settings.json`` with validation."""
+    default_settings: Dict[str, Any] = {
         "trigger_path": "None",
         "ac_keywords": ANTICHEAT_KEYWORDS,
         "ignore_folders": FOLDERS_TO_IGNORE,
-        "risky_triggers": []
+        "risky_triggers": [],
     }
-    
+
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, "r") as f:
                 loaded = json.load(f)
-                
-                # Update with loaded settings, keeping defaults for missing keys
-                for key in default_settings:
-                    if key in loaded:
-                        default_settings[key] = loaded[key]
-                return default_settings
+            return _validate_settings(loaded, default_settings)
         except Exception as e:
             print(f"Error loading settings: {e}")
-    
+
     return default_settings
 
 ################## Worker Threads #########################
